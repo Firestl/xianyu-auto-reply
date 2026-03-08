@@ -71,6 +71,14 @@ jobs:
           fi
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Debug connectivity
+        run: |
+          echo "Runner public IP:"
+          curl -s https://ifconfig.me || true
+          port="${DEPLOY_PORT:-22}"
+          echo "Connecting to $DEPLOY_HOST port $port"
+          ssh -v -o ConnectTimeout=10 -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes -p "$port" "$DEPLOY_USER@$DEPLOY_HOST" echo "SSH OK" 2>&1 || true
+
       - name: Run remote deployment
         run: |
           set -euo pipefail
