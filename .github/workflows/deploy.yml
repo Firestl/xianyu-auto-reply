@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       deploy_port:
-        description: SSH port to connect to the server
+        description: SSH port to connect to the server (leave empty to use DEPLOY_PORT secret)
         required: false
-        default: '22'
+        default: ''
       deploy_branch:
         description: Branch to deploy when manually triggered
         required: false
