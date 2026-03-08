@@ -1,0 +1,93 @@
+name: Auto Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      deploy_port:
+        description: SSH port to connect to the server
+        required: false
+        default: '22'
+      deploy_branch:
+        description: Branch to deploy when manually triggered
+        required: false
+        default: main
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_port || secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+      COMPOSE_FILE: ${{ secrets.COMPOSE_FILE }}
+      COMPOSE_PROJECT_NAME: ${{ secrets.COMPOSE_PROJECT_NAME }}
+      COMPOSE_PROFILE: ${{ secrets.COMPOSE_PROFILE }}
+      SERVICES: ${{ secrets.SERVICES }}
+      GIT_REMOTE: ${{ secrets.GIT_REMOTE }}
+      USE_SUDO: ${{ secrets.USE_SUDO }}
+      DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_branch || github.ref_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate deploy secrets
+        run: |
+          set -euo pipefail
+          required_vars=(DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_KEY)
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name:-}" ]; then
+              echo "Missing required secret: ${var_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          port="${DEPLOY_PORT:-22}"
+          if [ -n "${DEPLOY_HOST_KEY:-}" ]; then
+            printf '%s\n' "$DEPLOY_HOST_KEY" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$port" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Run remote deployment
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=yes \
+            -p "$port" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            env \
+              DEPLOY_PATH="$DEPLOY_PATH" \
+              DEPLOY_BRANCH="$DEPLOY_BRANCH" \
+              COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}" \
+              COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-xianyu-auto-reply}" \
+              COMPOSE_PROFILE="${COMPOSE_PROFILE:-}" \
+              SERVICES="${SERVICES:-}" \
+              GIT_REMOTE="${GIT_REMOTE:-origin}" \
+              USE_SUDO="${USE_SUDO:-false}" \
+              'bash -s' < scripts/deploy/update_and_restart.sh
